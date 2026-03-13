@@ -1,0 +1,35 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>true</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Sts2Dir>D:\SteamLibrary\steamapps\common\Slay the Spire 2</Sts2Dir>
+    <Sts2DataDir>$(Sts2Dir)\data_sts2_windows_x86_64</Sts2DataDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="sts2">
+      <HintPath>$(Sts2DataDir)\sts2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <!-- Exclude resource directories from C# compilation -->
+  <ItemGroup>
+    <Compile Remove="ModConfig\**" />
+  </ItemGroup>
+  <!-- Embed localization JSON into DLL -->
+  <ItemGroup>
+    <EmbeddedResource Include="ModConfig\localization\**\*.json">
+      <LogicalName>ModConfig.localization.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <!-- Auto-copy DLL to game mods folder on build -->
+  <Target Name="CopyMod" AfterTargets="PostBuildEvent">
+    <Exec Command="del /Q &quot;$(Sts2Dir)\mods\$(MSBuildProjectName)\$(MSBuildProjectName).dll.bak*&quot; 2&gt;NUL"
+          ContinueOnError="true" />
+    <Exec Command="if exist &quot;$(Sts2Dir)\mods\$(MSBuildProjectName)\$(MSBuildProjectName).dll&quot; move /Y &quot;$(Sts2Dir)\mods\$(MSBuildProjectName)\$(MSBuildProjectName).dll&quot; &quot;$(Sts2Dir)\mods\$(MSBuildProjectName)\$(MSBuildProjectName).dll.bak.%RANDOM%&quot;"
+          ContinueOnError="true" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(Sts2Dir)\mods\$(MSBuildProjectName)\" />
+  </Target>
+</Project>

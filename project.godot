@@ -1,0 +1,7 @@
+config_version=5
+
+[application]
+config/name="ModConfig"
+
+[dotnet]
+project/assembly_name="ModConfig"
