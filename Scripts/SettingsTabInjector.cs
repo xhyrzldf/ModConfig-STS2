@@ -26,6 +26,22 @@ internal static class SettingsTabInjector
 
     // Collapsible mod sections — track which mods are collapsed by modId
     private static readonly HashSet<string> _collapsedMods = new();
+    private static readonly Dictionary<(string ModId, string Key), List<LiveBinding>> _liveBindings = new();
+
+    private sealed class LiveBinding
+    {
+        public LiveBinding(Func<object, bool> apply)
+        {
+            Apply = apply;
+        }
+
+        public Func<object, bool> Apply { get; }
+    }
+
+    private sealed class UiUpdateGuard
+    {
+        public bool Suppress { get; set; }
+    }
 
     // ─── Colors matching the game's settings screen palette ─────────
     private static readonly Color CreamGold = new("D4C88E");
@@ -237,6 +253,8 @@ internal static class SettingsTabInjector
 
     internal static void RefreshUI()
     {
+        _liveBindings.Clear();
+
         for (int i = _allContainers.Count - 1; i >= 0; i--)
         {
             if (!_allContainers[i].TryGetTarget(out var container) ||
@@ -250,6 +268,42 @@ internal static class SettingsTabInjector
                 child.QueueFree();
             PopulateInto(container);
         }
+    }
+
+    internal static void NotifyValueChanged(string modId, string key, object value)
+    {
+        var bindingKey = (modId, key);
+        if (!_liveBindings.TryGetValue(bindingKey, out var bindings))
+            return;
+
+        for (int i = bindings.Count - 1; i >= 0; i--)
+        {
+            try
+            {
+                if (!bindings[i].Apply(value))
+                    bindings.RemoveAt(i);
+            }
+            catch (Exception e)
+            {
+                MainFile.Log.Error($"Live config UI update failed [{modId}.{key}]: {e}");
+                bindings.RemoveAt(i);
+            }
+        }
+
+        if (bindings.Count == 0)
+            _liveBindings.Remove(bindingKey);
+    }
+
+    private static void RegisterLiveBinding(string modId, string key, Func<object, bool> apply)
+    {
+        var bindingKey = (modId, key);
+        if (!_liveBindings.TryGetValue(bindingKey, out var bindings))
+        {
+            bindings = new List<LiveBinding>();
+            _liveBindings[bindingKey] = bindings;
+        }
+
+        bindings.Add(new LiveBinding(apply));
     }
 
     // ─── Content Population ──────────────────────────────────────
@@ -575,7 +629,30 @@ internal static class SettingsTabInjector
         {
             ButtonPressed = ModConfigManager.GetValue<bool>(modId, entry.Key),
         };
-        toggle.Toggled += pressed => ModConfigManager.SetValue(modId, entry.Key, pressed);
+        var guard = new UiUpdateGuard();
+        var toggleRef = new WeakReference<CheckButton>(toggle);
+
+        RegisterLiveBinding(modId, entry.Key, value =>
+        {
+            if (!TryGetLiveTarget(toggleRef, out var liveToggle))
+                return false;
+            if (!TryConvertValue(value, out bool pressed))
+                return true;
+            if (liveToggle.ButtonPressed == pressed)
+                return true;
+
+            guard.Suppress = true;
+            liveToggle.ButtonPressed = pressed;
+            guard.Suppress = false;
+            return true;
+        });
+
+        toggle.Toggled += pressed =>
+        {
+            if (guard.Suppress)
+                return;
+            ModConfigManager.SetValue(modId, entry.Key, pressed);
+        };
 
         ApplyTooltip(hbox, entry);
         hbox.AddChild(label);
@@ -619,9 +696,35 @@ internal static class SettingsTabInjector
         valueLabel.AddThemeColorOverride("font_color", CreamGold);
         valueLabel.AddThemeFontSizeOverride("font_size", 18);
 
+        var guard = new UiUpdateGuard();
+        var sliderRef = new WeakReference<HSlider>(slider);
+        var valueLabelRef = new WeakReference<Label>(valueLabel);
+
+        RegisterLiveBinding(modId, entry.Key, value =>
+        {
+            if (!TryGetLiveTarget(sliderRef, out var liveSlider))
+                return false;
+            if (!TryConvertValue(value, out float numericValue))
+                return true;
+
+            if (Math.Abs(liveSlider.Value - numericValue) > 0.0001d)
+            {
+                guard.Suppress = true;
+                liveSlider.Value = numericValue;
+                guard.Suppress = false;
+            }
+
+            if (TryGetLiveTarget(valueLabelRef, out var liveValueLabel))
+                liveValueLabel.Text = numericValue.ToString(fmt);
+
+            return true;
+        });
+
         slider.ValueChanged += value =>
         {
             valueLabel.Text = ((float)value).ToString(fmt);
+            if (guard.Suppress)
+                return;
             ModConfigManager.SetValue(modId, entry.Key, (float)value);
         };
 
@@ -661,8 +764,30 @@ internal static class SettingsTabInjector
             }
         }
 
+        var guard = new UiUpdateGuard();
+        var dropdownRef = new WeakReference<OptionButton>(dropdown);
+
+        RegisterLiveBinding(modId, entry.Key, value =>
+        {
+            if (!TryGetLiveTarget(dropdownRef, out var liveDropdown))
+                return false;
+            if (!TryConvertValue(value, out string selectedValue) || entry.Options == null)
+                return true;
+
+            int selectedIndex = Array.IndexOf(entry.Options, selectedValue);
+            if (selectedIndex < 0 || liveDropdown.Selected == selectedIndex)
+                return true;
+
+            guard.Suppress = true;
+            liveDropdown.Selected = selectedIndex;
+            guard.Suppress = false;
+            return true;
+        });
+
         dropdown.ItemSelected += index =>
         {
+            if (guard.Suppress)
+                return;
             if (entry.Options != null && index < entry.Options.Length)
                 ModConfigManager.SetValue(modId, entry.Key, entry.Options[index]);
         };
@@ -692,11 +817,32 @@ internal static class SettingsTabInjector
         long currentKey = ModConfigManager.GetValue<long>(modId, entry.Key);
         var btn = new Button
         {
-            Text = KeyToDisplayString(currentKey),
             CustomMinimumSize = new Vector2(140, 32),
             FocusMode = Control.FocusModeEnum.All,
+            TooltipText = I18n.KeyBindTooltip,
         };
         btn.AddThemeFontSizeOverride("font_size", 17);
+        ApplyKeyBindButtonState(btn, currentKey);
+
+        var buttonRef = new WeakReference<Button>(btn);
+        RegisterLiveBinding(modId, entry.Key, value =>
+        {
+            if (!TryGetLiveTarget(buttonRef, out var liveButton))
+                return false;
+            if (!TryConvertValue(value, out long keyCode))
+                return true;
+            if (_activeKeyBindButton != null &&
+                GodotObject.IsInstanceValid(_activeKeyBindButton) &&
+                ReferenceEquals(_activeKeyBindButton, liveButton) &&
+                _activeKeyBindModId == modId &&
+                _activeKeyBindEntry?.Key == entry.Key)
+            {
+                return true;
+            }
+
+            ApplyKeyBindButtonState(liveButton, keyCode);
+            return true;
+        });
 
         btn.Pressed += () =>
         {
@@ -704,8 +850,7 @@ internal static class SettingsTabInjector
             {
                 // Cancel previous listening
                 long prevKey = ModConfigManager.GetValue<long>(_activeKeyBindModId, _activeKeyBindEntry!.Key);
-                _activeKeyBindButton.Text = KeyToDisplayString(prevKey);
-                _activeKeyBindButton.RemoveThemeColorOverride("font_color");
+                ApplyKeyBindButtonState(_activeKeyBindButton, prevKey);
                 CancelKeyCapture();
             }
 
@@ -727,9 +872,20 @@ internal static class SettingsTabInjector
 
     private static string KeyToDisplayString(long keyCode)
     {
-        if (keyCode == 0) return I18n.KeyNone;
+        if (keyCode == 0) return I18n.KeyUnbound;
         var key = (Key)keyCode;
         return OS.GetKeycodeString(key);
+    }
+
+    private static void ApplyKeyBindButtonState(Button button, long keyCode)
+    {
+        button.Text = KeyToDisplayString(keyCode);
+        button.TooltipText = I18n.KeyBindTooltip;
+
+        if (keyCode == 0)
+            button.AddThemeColorOverride("font_color", DimText);
+        else
+            button.RemoveThemeColorOverride("font_color");
     }
 
     // Temporary Node used to capture _UnhandledKeyInput
@@ -742,9 +898,9 @@ internal static class SettingsTabInjector
         _captureNode.OnKeyCaptured = keyCode =>
         {
             ModConfigManager.SetValue(modId, entry.Key, keyCode);
-            btn.Text = KeyToDisplayString(keyCode);
-            btn.RemoveThemeColorOverride("font_color");
+            ApplyKeyBindButtonState(btn, keyCode);
             _activeKeyBindButton = null;
+            _activeKeyBindModId = "";
             _activeKeyBindEntry = null;
             CancelKeyCapture();
         };
@@ -785,6 +941,22 @@ internal static class SettingsTabInjector
         };
         lineEdit.AddThemeFontSizeOverride("font_size", 17);
 
+        var lineEditRef = new WeakReference<LineEdit>(lineEdit);
+        RegisterLiveBinding(modId, entry.Key, value =>
+        {
+            if (!TryGetLiveTarget(lineEditRef, out var liveLineEdit))
+                return false;
+            if (liveLineEdit.HasFocus())
+                return true;
+            if (!TryConvertValue(value, out string textValue))
+                return true;
+            if (liveLineEdit.Text == textValue)
+                return true;
+
+            liveLineEdit.Text = textValue;
+            return true;
+        });
+
         // Save on focus lost or Enter pressed
         lineEdit.TextSubmitted += text => ModConfigManager.SetValue(modId, entry.Key, text);
         lineEdit.FocusExited += () => ModConfigManager.SetValue(modId, entry.Key, lineEdit.Text);
@@ -794,5 +966,42 @@ internal static class SettingsTabInjector
         hbox.AddChild(lineEdit);
         parent.AddChild(hbox);
         AddDescriptionIfPresent(parent, entry);
+    }
+
+    private static bool TryGetLiveTarget<T>(WeakReference<T> reference, out T target) where T : GodotObject
+    {
+        if (reference.TryGetTarget(out var liveTarget) && GodotObject.IsInstanceValid(liveTarget))
+        {
+            target = liveTarget;
+            return true;
+        }
+
+        target = null!;
+        return false;
+    }
+
+    private static bool TryConvertValue<T>(object value, out T converted)
+    {
+        try
+        {
+            if (value is T typedValue)
+            {
+                converted = typedValue;
+                return true;
+            }
+
+            object? changedValue = Convert.ChangeType(value, typeof(T));
+            if (changedValue is T finalValue)
+            {
+                converted = finalValue;
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        converted = default!;
+        return false;
     }
 }

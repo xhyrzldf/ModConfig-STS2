@@ -28,7 +28,8 @@ internal static class I18n
     internal static string NoConfigs => Get("no_configs", "No mods have registered configurations.");
     internal static string ResetDefaults => Get("reset_defaults", "Reset");
     internal static string PressAnyKey => Get("press_any_key", "Press any key...");
-    internal static string KeyNone => Get("key_none", "None");
+    internal static string KeyUnbound => Get("key_unbound", "Unbound");
+    internal static string KeyBindTooltip => Get("keybind_tooltip", "Click to rebind. Press Esc or click anywhere to clear.");
 
     // ─── Lifecycle ──────────────────────────────────────────────────
 

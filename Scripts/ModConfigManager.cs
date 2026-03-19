@@ -75,6 +75,7 @@ internal static class ModConfigManager
             catch (Exception e) { MainFile.Log.Error($"Config callback error [{modId}.{key}]: {e}"); }
         }
 
+        SettingsTabInjector.NotifyValueChanged(modId, key, value);
         ScheduleSave(modId);
     }
 
