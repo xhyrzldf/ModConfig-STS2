@@ -175,29 +175,9 @@ internal static class SettingsTabInjector
                 _i18nSubscribed = true;
             }
 
-            // === 6. Cap panel height so ScrollContainer can actually scroll ===
-            // NSettingsPanel.RefreshSize() expands panel to fit content, defeating scrolling.
-            // Disconnect it and set a fixed max height based on other tabs' panels.
-            try
-            {
-                var viewport = modsPanel.GetViewport();
-                if (viewport != null)
-                    viewport.Disconnect(Viewport.SignalName.SizeChanged,
-                        new Callable(modsPanel, NSettingsPanel.MethodName.RefreshSize));
-
-                // Match the first panel's height (it fits the settings screen)
-                float maxHeight = firstPanel.Size.Y;
-                if (maxHeight < 100)
-                    maxHeight = modsPanel.GetParent<Control>().Size.Y * 0.85f;
-                modsPanel.Size = new Vector2(modsPanel.Size.X, maxHeight);
-            }
-            catch (Exception e)
-            {
-                MainFile.Log.Error($"Failed to cap panel height: {e}");
-            }
-
-            // === 7. Populate ===
+            // === 6. Populate ===
             PopulateInto(contentContainer);
+            RefreshPanelSize(modsPanel, contentContainer);
 
             MainFile.Log.Info("Mods tab injected into settings screen!");
         }
@@ -265,8 +245,13 @@ internal static class SettingsTabInjector
             }
 
             foreach (var child in container.GetChildren().ToArray())
-                child.QueueFree();
+            {
+                container.RemoveChild(child);
+                child.Free();
+            }
+
             PopulateInto(container);
+            RefreshPanelSize(container.GetParent<NSettingsPanel>(), container);
         }
     }
 
@@ -319,18 +304,7 @@ internal static class SettingsTabInjector
             return;
         }
 
-        // Wrap all content in a ScrollContainer so it scrolls when many mods register
-        var scroll = new ScrollContainer();
-        scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
-        scroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
-        scroll.SizeFlagsVertical = Control.SizeFlags.ExpandFill;
-        scroll.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        scroll.FollowFocus = true;
-        contentContainer.AddChild(scroll);
-
-        var target = new VBoxContainer();
-        target.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        scroll.AddChild(target);
+        var target = contentContainer;
 
         bool first = true;
         foreach (var (modId, reg) in registrations)
@@ -367,6 +341,7 @@ internal static class SettingsTabInjector
                     bool collapsed = _collapsedMods.Contains(modId);
                     capturedEntriesBox.Visible = !collapsed;
                     capturedLabel.Text = $"{(collapsed ? "\u25b6" : "\u25bc")}  {capturedReg.GetLocalizedName()}";
+                    RefreshPanelSize(contentContainer.GetParent<NSettingsPanel>(), contentContainer);
                 }
             };
 
@@ -407,6 +382,17 @@ internal static class SettingsTabInjector
             if (isCollapsed)
                 entriesBox.Visible = false;
         }
+    }
+
+    private static void RefreshPanelSize(NSettingsPanel panel, VBoxContainer contentContainer)
+    {
+        var parent = panel.GetParent<Control>();
+        var minimumSize = contentContainer.GetMinimumSize();
+        float height = minimumSize.Y + 50f >= parent.Size.Y
+            ? minimumSize.Y + parent.Size.Y * 0.4f
+            : minimumSize.Y;
+
+        panel.Size = new Vector2(panel.Size.X, height);
     }
 
     // ─── Label Resolution ────────────────────────────────────────
