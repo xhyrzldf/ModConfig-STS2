@@ -3,7 +3,7 @@
   "name": "ModConfig",
   "author": "皮一下就很凡@Bilibili",
   "description": "通用模组配置框架 | Universal Mod Configuration Framework\n在游戏设置页嵌入「模组配置」标签页，其他模组通过 API 注册配置项即可自动显示。支持开关、滑条、下拉框、快捷键绑定、文本输入等控件。\nInjects a \"Mods\" tab into the game settings screen. Other mods register config entries via API — toggles, sliders, dropdowns, keybinds, and text inputs rendered automatically.",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "has_pck": true,
   "has_dll": true,
   "dependencies": [],
