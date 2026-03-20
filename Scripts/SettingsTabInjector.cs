@@ -124,6 +124,7 @@ internal static class SettingsTabInjector
             var modsPanel = (NSettingsPanel)firstPanel.Duplicate();
             modsPanel.Name = "ModsSettings";
             modsPanel.Visible = false;
+            Control? preReadyFocusSentinel = CreatePreReadyFocusSentinel(firstPanel);
 
             // Identify Content container name from the original (already in tree)
             var contentName = firstPanel.Content?.Name;
@@ -131,7 +132,12 @@ internal static class SettingsTabInjector
 
             foreach (var child in modsPanel.GetChildren().ToArray())
             {
-                if (contentName != null && child.Name == contentName && child is VBoxContainer vbox)
+                bool keepAsContent =
+                    child is VBoxContainer vboxCandidate &&
+                    ((contentName != null && child.Name == contentName) ||
+                     (contentName == null && contentContainer == null));
+
+                if (keepAsContent && child is VBoxContainer vbox)
                 {
                     contentContainer = vbox;
                     foreach (var inner in vbox.GetChildren().ToArray())
@@ -145,6 +151,14 @@ internal static class SettingsTabInjector
                     modsPanel.RemoveChild(child);
                     child.Free();
                 }
+            }
+
+            if (contentContainer != null && preReadyFocusSentinel != null)
+            {
+                preReadyFocusSentinel.Name = "__PreReadyFocusSentinel";
+                preReadyFocusSentinel.Visible = false;
+                preReadyFocusSentinel.MouseFilter = Control.MouseFilterEnum.Ignore;
+                contentContainer.AddChild(preReadyFocusSentinel);
             }
 
             firstPanel.GetParent().AddChild(modsPanel);
@@ -182,8 +196,13 @@ internal static class SettingsTabInjector
             {
                 var viewport = modsPanel.GetViewport();
                 if (viewport != null)
-                    viewport.Disconnect(Viewport.SignalName.SizeChanged,
-                        new Callable(modsPanel, NSettingsPanel.MethodName.RefreshSize));
+                {
+                    var refreshCallable = new Callable(modsPanel, NSettingsPanel.MethodName.RefreshSize);
+                    if (viewport.IsConnected(Viewport.SignalName.SizeChanged, refreshCallable))
+                    {
+                        viewport.Disconnect(Viewport.SignalName.SizeChanged, refreshCallable);
+                    }
+                }
 
                 // Match the first panel's height (it fits the settings screen)
                 float maxHeight = firstPanel.Size.Y;
@@ -198,6 +217,7 @@ internal static class SettingsTabInjector
 
             // === 7. Populate ===
             PopulateInto(contentContainer);
+            RebuildFocusTargets(modsPanel, contentContainer, preReadyFocusSentinel);
 
             MainFile.Log.Info("Mods tab injected into settings screen!");
         }
@@ -267,6 +287,106 @@ internal static class SettingsTabInjector
             foreach (var child in container.GetChildren().ToArray())
                 child.QueueFree();
             PopulateInto(container);
+
+            var panel = FindOwningSettingsPanel(container);
+            if (panel != null)
+                RebuildFocusTargets(panel, container, null);
+        }
+    }
+
+    private static Control? CreatePreReadyFocusSentinel(NSettingsPanel firstPanel)
+    {
+        try
+        {
+            if (firstPanel.DefaultFocusedControl is not Control defaultFocused ||
+                !GodotObject.IsInstanceValid(defaultFocused))
+            {
+                return null;
+            }
+
+            if (defaultFocused.Duplicate() is not Control duplicate)
+                return null;
+
+            duplicate.FocusMode = Control.FocusModeEnum.All;
+            return duplicate;
+        }
+        catch (Exception e)
+        {
+            MainFile.Log.Error($"Failed to create pre-ready focus sentinel: {e}");
+            return null;
+        }
+    }
+
+    private static NSettingsPanel? FindOwningSettingsPanel(Control control)
+    {
+        Node? current = control;
+        while (current != null)
+        {
+            if (current is NSettingsPanel panel)
+                return panel;
+            current = current.GetParent();
+        }
+
+        return null;
+    }
+
+    private static void RebuildFocusTargets(
+        NSettingsPanel panel,
+        VBoxContainer contentContainer,
+        Control? preReadyFocusSentinel)
+    {
+        try
+        {
+            List<Control> focusables = new();
+            CollectFocusableControls(contentContainer, focusables);
+
+            if (preReadyFocusSentinel != null &&
+                GodotObject.IsInstanceValid(preReadyFocusSentinel) &&
+                preReadyFocusSentinel.GetParent() == contentContainer &&
+                focusables.Count > 0)
+            {
+                contentContainer.RemoveChild(preReadyFocusSentinel);
+                preReadyFocusSentinel.QueueFree();
+                preReadyFocusSentinel = null;
+            }
+
+            if (focusables.Count == 0 &&
+                preReadyFocusSentinel != null &&
+                GodotObject.IsInstanceValid(preReadyFocusSentinel))
+            {
+                focusables.Add(preReadyFocusSentinel);
+            }
+
+            for (int i = 0; i < focusables.Count; i++)
+            {
+                Control control = focusables[i];
+                control.FocusNeighborLeft = control.GetPath();
+                control.FocusNeighborRight = control.GetPath();
+                control.FocusNeighborTop = (i > 0 ? focusables[i - 1] : control).GetPath();
+                control.FocusNeighborBottom = (i < focusables.Count - 1 ? focusables[i + 1] : control).GetPath();
+            }
+
+            FieldInfo? firstControlField = typeof(NSettingsPanel).GetField("_firstControl", PrivateInstance);
+            if (firstControlField != null)
+                firstControlField.SetValue(panel, focusables.FirstOrDefault());
+        }
+        catch (Exception e)
+        {
+            MainFile.Log.Error($"Failed to rebuild settings panel focus targets: {e}");
+        }
+    }
+
+    private static void CollectFocusableControls(Control parent, List<Control> focusables)
+    {
+        foreach (Control child in parent.GetChildren().OfType<Control>())
+        {
+            if (!child.Visible)
+                continue;
+
+            if (child.FocusMode == Control.FocusModeEnum.All)
+                focusables.Add(child);
+
+            CollectFocusableControls(child, focusables);
         }
     }
 

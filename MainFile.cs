@@ -7,7 +7,7 @@ namespace ModConfig;
 public class MainFile
 {
     internal const string ModId = "sts2.piyixiajiuhenfen.modconfig";
-    internal const string Version = "0.1.6";
+    internal const string Version = "0.1.7";
     internal static readonly Logger Log = new(ModId, LogType.Generic);
 
     public static void Initialize()
