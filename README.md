@@ -33,7 +33,9 @@ Install ModConfig alongside any mod that supports it. A new **"Mods"** tab will 
 | **Slider** | Numeric range with step | 滑条（支持步长和格式化） |
 | **Dropdown** | Select from options | 下拉框 |
 | **KeyBind** | Keyboard shortcut capture | 快捷键绑定（支持组合键） |
-| **TextInput** | Free-form text entry | 文本输入框 |
+| **TextInput** | Free-form text entry (with optional validation) | 文本输入框（支持校验） |
+| **Button** | Action trigger, no persisted value | 动作按钮，不存储值 |
+| **ColorPicker** | Hex color picker with live preview | 颜色选择器（`#RRGGBB`） |
 | **Header** | Section title (visual only) | 分组标题 |
 | **Separator** | Visual divider (visual only) | 分隔线 |
 
@@ -121,6 +123,19 @@ internal static class ModConfigBridge
             MakeEntry("my_slider", "Speed", ConfigTypeValue("Slider"),
                 defaultValue: 1.0f, min: 0.5f, max: 3.0f, step: 0.1f, format: "F1",
                 onChanged: v => MySettings.Speed = (float)v),
+
+            MakeEntry("my_color", "Highlight Color", ConfigTypeValue("ColorPicker"),
+                defaultValue: "#FF6600",
+                onChanged: v => MySettings.HighlightColor = (string)v),
+
+            MakeEntry("my_name", "Player Name", ConfigTypeValue("TextInput"),
+                defaultValue: "",
+                validator: v => !string.IsNullOrWhiteSpace((string)v),
+                onChanged: v => MySettings.PlayerName = (string)v),
+
+            MakeEntry("reset", "Reset All Data", ConfigTypeValue("Button"),
+                buttonText: "Reset",
+                onChanged: _ => MySettings.ResetAll()),
         };
 
         // Call ModConfigApi.Register(modId, displayName, entries)
@@ -137,6 +152,7 @@ internal static class ModConfigBridge
     private static object MakeEntry(string key, string label, object type,
         object? defaultValue = null, float min = 0, float max = 100, float step = 1,
         string format = "F0", string[]? options = null,
+        string? buttonText = null, Func<object, bool>? validator = null,
         Action<object>? onChanged = null,
         Dictionary<string, string>? labels = null,
         Dictionary<string, string>? descriptions = null)
@@ -151,6 +167,8 @@ internal static class ModConfigBridge
         SetProp(entry, "Step", step);
         SetProp(entry, "Format", format);
         if (options != null) SetProp(entry, "Options", options);
+        if (buttonText != null) SetProp(entry, "ButtonText", buttonText);
+        if (validator != null) SetProp(entry, "Validator", validator);
         if (onChanged != null) SetProp(entry, "OnChanged", onChanged);
         if (labels != null) SetProp(entry, "Labels", labels);
         if (descriptions != null) SetProp(entry, "Descriptions", descriptions);
@@ -222,7 +240,7 @@ MakeEntry("my_toggle", "My Feature", ConfigTypeValue("Toggle"),
 | `Label` | string | All | Display text (English fallback) |
 | `Labels` | Dict | All | Per-language labels `{"en":"...", "zhs":"..."}` |
 | `Type` | ConfigType | All | Control type to render |
-| `DefaultValue` | object | Toggle/Slider/Dropdown/KeyBind/TextInput | Default value |
+| `DefaultValue` | object | Toggle/Slider/Dropdown/KeyBind/TextInput/ColorPicker | Default value (`"#RRGGBB"` for ColorPicker) |
 | `Min` | float | Slider | Minimum value |
 | `Max` | float | Slider | Maximum value (default: 100) |
 | `Step` | float | Slider | Step increment (default: 1) |
@@ -230,6 +248,9 @@ MakeEntry("my_toggle", "My Feature", ConfigTypeValue("Toggle"),
 | `Options` | string[] | Dropdown | Selectable options |
 | `MaxLength` | int | TextInput | Max characters (default: 64) |
 | `Placeholder` | string | TextInput | Placeholder text |
+| `ButtonText` | string | Button | Text displayed on the button |
+| `ButtonTexts` | Dict | Button | Per-language button texts |
+| `Validator` | Func\<object, bool\> | TextInput | Returns true if valid; red border on false |
 | `OnChanged` | Action\<object\> | All data types | Callback when value changes |
 | `Description` | string | All | Tooltip / description text |
 | `Descriptions` | Dict | All | Per-language descriptions |
