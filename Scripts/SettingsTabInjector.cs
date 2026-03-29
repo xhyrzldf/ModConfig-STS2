@@ -804,16 +804,23 @@ internal static class SettingsTabInjector
 
     private static void AddSectionHeader(VBoxContainer parent, string text)
     {
+        // Render headers inside a row container so other mods can append preview widgets
+        // by locating the label and mutating its HBox parent at runtime.
+        var row = new HBoxContainer { CustomMinimumSize = new Vector2(0, 32) };
+        row.AddThemeConstantOverride("separation", 12);
+
         var label = new Label
         {
             Text = text,
             HorizontalAlignment = HorizontalAlignment.Left,
-            CustomMinimumSize = new Vector2(0, 32),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
         };
         label.AddThemeColorOverride("font_color", DimText);
         label.AddThemeFontSizeOverride("font_size", 20);
         ApplyGameFont(label);
-        parent.AddChild(label);
+
+        row.AddChild(label);
+        parent.AddChild(row);
     }
 
     private static void AddCenteredLabel(VBoxContainer parent, string text)
